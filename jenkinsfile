@@ -1,0 +1,74 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Sequential and Parallel Tasks') {
+            steps {
+                script {
+                    // Stage for sequential tasks
+                    sequential_tasks()
+
+                    // Parallel execution for tasks that can run in parallel
+                    parallel([
+                        'Primary DB Tasks': {
+                            ansible_run('primary', 'primary_db_tasks.yml')
+                        },
+                        'DW DB Tasks': {
+                            ansible_run('dw', 'dw_db_tasks.yml')
+                        }
+                    ])
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            // User interaction on failure
+            script {
+                def choice = input(
+                    id: 'failure_options',
+                    message: "A stage failed. What do you want to do?",
+                    parameters: [
+                        choice(name: 'action', choices: ['RERUN', 'SKIP'])
+                    ]
+                )
+                if (choice == 'RERUN') {
+                    // Re-run the failed stage. This requires a specific strategy.
+                    // For parallel stages, we'll need to know which one failed.
+                    // This is handled by a custom script/logic.
+                    echo "Rerunning the failed stage..."
+                    // A more advanced solution would re-trigger the specific parallel block.
+                    // For this example, we'll prompt the user and let them manually re-run.
+                    // A better approach would be to split the parallel stages into their own Jenkins jobs.
+                } else {
+                    echo "Skipping the failed stage and continuing..."
+                }
+            }
+        }
+    }
+}
+
+// Custom functions for clarity and reusability
+def sequential_tasks() {
+    // Stage 1: Sequential task 1
+    stage('Task 1 - DDL on Primary') {
+        ansible_run('primary', 'common_db_tasks.yml', 'task_01_ddl')
+    }
+
+    // Stage 2: Sequential task 2
+    stage('Task 2 - DML on DW') {
+        ansible_run('dw', 'common_db_tasks.yml', 'task_02_dml')
+    }
+}
+
+// Helper function to run Ansible with error handling
+def ansible_run(inventory_group, playbook, tag = null) {
+    try {
+        sh "ansible-playbook -i ansible/inventory.ini ansible/${playbook} --limit ${inventory_group} ${tag ? '--tags ' + tag : ''}"
+    } catch (error) {
+        // Here we can capture which stage failed for better post-failure handling
+        echo "Ansible playbook failed for ${inventory_group} with playbook ${playbook} and tag ${tag}"
+        throw error
+    }
+}
